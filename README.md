@@ -32,6 +32,8 @@ curl -L https://raw.githubusercontent.com/sssspc/realm/refs/heads/main/realm.sh 
 [network]
 no_tcp = false #是否关闭tcp转发
 use_udp = true #是否开启udp转发
+zero_copy = true
+fast_open = true
 tcp_timeout = 300
 udp_timeout = 30
 send_proxy = false
