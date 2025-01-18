@@ -44,6 +44,6 @@ accept_proxy_timeout = 5
 
 [[endpoints]]
 listen = "0.0.0.0:1234"
-remote = "1.1.1.1:5678"
+remote = "1.1.1.1:443"
 ```
 ## 如需其他更多配置请参考官方文档： https://github.com/zhboner/realm
