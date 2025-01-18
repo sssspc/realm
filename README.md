@@ -23,10 +23,6 @@ realm 转发状态：启用
 ```
 curl -L https://github.com/sssspc/realm/releases/download/v1.0/realm.sh -o realm.sh && chmod +x realm.sh &&  ./realm.sh
 ```
-或
-```
-curl -L https://raw.githubusercontent.com/sssspc/realm/refs/heads/main/realm.sh -o realm.sh && chmod +x realm.sh &&  ./realm.sh
-```
 ## 默认配置文件（脚本在首次部署环境时会自动添加）
 ```
 [network]
