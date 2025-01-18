@@ -6,7 +6,7 @@ green="\033[0;32m"
 plain="\033[0m"
 
 # 脚本版本
-sh_ver="2.1"
+sh_ver="1.0"
 
 # 初始化环境目录
 init_env() {
@@ -142,13 +142,10 @@ show_menu() {
     echo "8. 检测更新"
     echo "9. 一键卸载"
     echo "10. 更新脚本"
-    echo "11. 面板管理"
     echo "0. 退出脚本"
     echo "================="
     echo -e "realm 状态：${realm_status_color}${realm_status}${plain}"
     echo -e "realm 转发状态：${realm_service_status_color}${realm_service_status}${plain}"
-    echo -e "面板状态：${panel_status_color}${panel_status}${plain}"
-    echo -e "面板服务状态：${panel_service_status_color}${panel_service_status}${plain}"
 }
 
 # 部署环境的函数
@@ -433,6 +430,7 @@ main() {
             7) restart_service ;;
             8) update_realm ;;
             9) uninstall_realm ;;
+            10) Update_Shell ;;
             0) exit 0 ;;
             *) echo "无效的选项，请重新输入。" ;;
         esac
