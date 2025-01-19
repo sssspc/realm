@@ -213,8 +213,8 @@ accept_proxy_timeout = 5
 # remote = "目标机ip:目标端口"
 
 [[endpoints]]
-listen = "0.0.0.0:1234"
-remote = "1.1.1.1:5678"
+listen = "0.0.0.0:15678"
+remote = "1.1.1.1:443"
 EOF
 
     echo "[Unit]
@@ -260,7 +260,7 @@ uninstall_realm() {
         echo "配置文件保留。"
     fi
 
-    update_realm_status
+    
 }
 
 # 删除转发规则的函数
