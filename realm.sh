@@ -305,14 +305,16 @@ delete_forward() {
     local start_line=$line_number
     while [ $start_line -ge 1 ]; do
         local line_content=$(sed -n "${start_line}p" /opt/.realm/config.toml)
-        if [[ $line_content =~ $$\[endpoints$$\] ]]; then
+        if [[ $line_content =~ \[\[endpoints\]\] ]]; then
             break
         fi
         ((start_line--))
     done
 
-    # 删除从 start_line 开始的 3 行
-    sed -i "${start_line},$(($start_line+3))d" /opt/.realm/config.toml
+    # 删除start_line-1的空行并删除从 start_line 开始的 3 行
+    sed -i "$((start_line-1))d;${start_line},$(($start_line+3))d" /opt/.realm/config.toml
+    # 删除配置查看文档第choice行转发
+    sed -i "$((choice-1))d" $RAW_CONF_PATH
 
     echo "转发规则已删除。"
 }
@@ -349,19 +351,19 @@ rawconf() {
 }
 
 read_protocol() {
-    flag_a = "nonencrypt"
+    flag_a="nonencrypt"
 }
 
 read_s_port() {
-    flag_b = port1
+    flag_b=$port1
 }
 
 read_d_ip() {
-    flag_c = ip
+    flag_c=$ip
 }
 
 read_d_port() {
-    flag_d = port2
+    flag_d=$port2
 }
 
 writerawconf() {
@@ -507,6 +509,7 @@ eachconf_retrieve() {
     d_ip=${d_server%#*}
     flag_s_port=${trans_conf%%#*}
     s_port=${flag_s_port#*/}
+	is_encrypt=${flag_s_port%/*}
 }
 
 # 主程序
