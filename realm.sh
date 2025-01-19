@@ -313,8 +313,8 @@ delete_forward() {
 
     # 删除start_line-1的空行并删除从 start_line 开始的 3 行
     sed -i "$((start_line-1))d;${start_line},$(($start_line+3))d" /opt/.realm/config.toml
-    # 删除配置查看文档第choice行转发
-    sed -i "$((choice-1))d" $RAW_CONF_PATH
+	# 删除配置查看文档第choice行转发
+	sed -i "$((choice-1))d" $RAW_CONF_PATH
 
     echo "转发规则已删除。"
 }
