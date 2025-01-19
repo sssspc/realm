@@ -148,8 +148,8 @@ show_menu() {
 
 # 部署环境的函数
 deploy_realm() {
-    mkdir -p /root/realm
-    cd /root/realm
+    mkdir -p /opt/realm
+    cd /opt/realm
 
     _version=$(curl -s https://api.github.com/repos/zhboner/realm/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
