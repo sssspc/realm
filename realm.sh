@@ -6,7 +6,7 @@ green="\033[0;32m"
 plain="\033[0m"
 
 # 脚本版本
-sh_ver="1.0"
+sh_ver="1.1"
 
 # 初始化环境目录
 init_env() {
@@ -16,6 +16,7 @@ init_env() {
 
 # 配置文件路径
 CONFIG_PATH="/opt/.realm/config.toml"
+RAW_CONF_PATH="/opt/.realm/rawconf"
 
 # 处理命令行参数
 while getopts "l:r:" opt; do
@@ -131,15 +132,16 @@ show_menu() {
     echo "欢迎使用realm一键转发脚本"
     echo "================="
     echo "1. 部署环境"
-    echo "2. 添加转发"
-    echo "3. 添加端口段转发"
-    echo "4. 删除转发"
-    echo "5. 启动服务"
-    echo "6. 停止服务"
-    echo "7. 重启服务"
-    echo "8. 检测更新"
-    echo "9. 一键卸载"
-    echo "10. 更新脚本"
+    echo "2. 添加realm转发"
+    echo "3. 添加端口段realm转发"
+	echo "4. 查看现有realm配置"
+    echo "5. 删除转发"
+    echo "6. 启动服务"
+    echo "7. 停止服务"
+    echo "8. 重启服务"
+    echo "9. 检测更新"
+    echo "10. 一键卸载"
+    echo "11. 更新脚本"
     echo "0. 退出脚本"
     echo "================="
     echo -e "realm 状态：${realm_status_color}${realm_status}${plain}"
@@ -318,19 +320,52 @@ delete_forward() {
 # 添加转发规则
 add_forward() {
     while true; do
+	    read -e -p "请问你要将本机哪个端口接收到的流量进行转发?（port1）: " port1
         read -e -p "请输入目标机的IP: " ip
-        read -e -p "请输入本地中转机的端口（port1）: " port1
         read -e -p "请输入目标机端口（port2）: " port2
         echo "
 [[endpoints]]
 listen = \"0.0.0.0:$port1\"
 remote = \"$ip:$port2\"" >> /opt/.realm/config.toml
+        rawconf
 
         read -e -p "是否继续添加转发规则(Y/N)? " answer
         if [[ $answer != "Y" && $answer != "y" ]]; then
             break
         fi
     done
+}
+
+writerawconf() {
+    echo $flag_a"/""$flag_b""#""$flag_c""#""$flag_d" >>$RAW_CONF_PATH
+}
+
+rawconf() {
+    read_protocol
+    read_s_port
+    read_d_ip
+    read_d_port
+    writerawconf
+}
+
+read_protocol() {
+    flag_a = "nonencrypt"
+}
+
+read_s_port() {
+    flag_b = port1
+}
+
+read_d_ip() {
+    flag_c = ip
+}
+
+read_d_port() {
+    flag_d = port2
+}
+
+writerawconf() {
+    echo $flag_a"/""$flag_b""#""$flag_c""#""$flag_d" >>$RAW_CONF_PATH
 }
 
 # 添加端口段转发
@@ -411,6 +446,69 @@ update_realm() {
     update_realm_status
 }
 
+# 查看现有realm转发配置
+show_all_conf() {
+    echo -e "                      realm 配置                        "
+    echo -e "--------------------------------------------------------"
+    echo -e "序号|方法\t    |本地端口\t|目的地地址:目的地端口"
+    echo -e "--------------------------------------------------------"
+	
+	count_line=$(awk 'END{print NR}' $RAW_CONF_PATH)
+    for ((i = 1; i <= $count_line; i++)); do
+    trans_conf=$(sed -n "${i}p" $RAW_CONF_PATH)
+    eachconf_retrieve
+
+    if [ "$is_encrypt" == "nonencrypt" ]; then
+      str="不加密中转"
+    elif [ "$is_encrypt" == "encrypttls" ]; then
+      str=" tls隧道 "
+    elif [ "$is_encrypt" == "encryptws" ]; then
+      str="  ws隧道 "
+    elif [ "$is_encrypt" == "encryptwss" ]; then
+      str=" wss隧道 "
+    elif [ "$is_encrypt" == "peerno" ]; then
+      str=" 不加密均衡负载 "
+    elif [ "$is_encrypt" == "peertls" ]; then
+      str=" tls隧道均衡负载 "
+    elif [ "$is_encrypt" == "peerws" ]; then
+      str="  ws隧道均衡负载 "
+    elif [ "$is_encrypt" == "peerwss" ]; then
+      str=" wss隧道均衡负载 "
+    elif [ "$is_encrypt" == "decrypttls" ]; then
+      str=" tls解密 "
+    elif [ "$is_encrypt" == "decryptws" ]; then
+      str="  ws解密 "
+    elif [ "$is_encrypt" == "decryptwss" ]; then
+      str=" wss解密 "
+    elif [ "$is_encrypt" == "ss" ]; then
+      str="   ss   "
+    elif [ "$is_encrypt" == "socks" ]; then
+      str=" socks5 "
+    elif [ "$is_encrypt" == "http" ]; then
+      str=" http "
+    elif [ "$is_encrypt" == "cdnno" ]; then
+      str="不加密转发CDN"
+    elif [ "$is_encrypt" == "cdnws" ]; then
+      str="ws隧道转发CDN"
+    elif [ "$is_encrypt" == "cdnwss" ]; then
+      str="wss隧道转发CDN"
+    else
+      str=""
+    fi
+	
+    echo -e " $i  |$str    |$s_port\t|$d_ip:$d_port"
+    echo -e "--------------------------------------------------------"
+    done
+}
+
+eachconf_retrieve() {
+    d_server=${trans_conf#*#}
+    d_port=${d_server#*#}
+    d_ip=${d_server%#*}
+    flag_s_port=${trans_conf%%#*}
+    s_port=${flag_s_port#*/}
+}
+
 # 主程序
 main() {
     check_dependencies
@@ -424,13 +522,14 @@ main() {
             1) deploy_realm ;;
             2) add_forward ;;
             3) add_port_range_forward ;;
-            4) delete_forward ;;
-            5) start_service ;;
-            6) stop_service ;;
-            7) restart_service ;;
-            8) update_realm ;;
-            9) uninstall_realm ;;
-            10) Update_Shell ;;
+			4) show_all_conf ;;
+            5) delete_forward ;;
+            6) start_service ;;
+            7) stop_service ;;
+            8) restart_service ;;
+            9) update_realm ;;
+            10) uninstall_realm ;;
+            11) Update_Shell ;;
             0) exit 0 ;;
             *) echo "无效的选项，请重新输入。" ;;
         esac
