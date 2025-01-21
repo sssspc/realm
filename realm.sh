@@ -134,7 +134,7 @@ show_menu() {
     echo "1. 部署环境"
     echo "2. 添加realm转发"
     echo "3. 添加端口段realm转发"
-	echo "4. 查看您添加的现有realm配置"
+    echo "4. 查看您添加的现有realm配置"
     echo "5. 删除转发"
     echo "6. 启动服务"
     echo "7. 停止服务"
