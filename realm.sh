@@ -134,7 +134,7 @@ show_menu() {
     echo "1. 部署环境"
     echo "2. 添加realm转发"
     echo "3. 添加端口段realm转发"
-	echo "4. 查看现有realm配置"
+	echo "4. 查看您添加的现有realm配置"
     echo "5. 删除转发"
     echo "6. 启动服务"
     echo "7. 停止服务"
@@ -282,6 +282,7 @@ delete_forward() {
         let index+=1
     done
 
+    echo -e "\033[31m请注意1.为默认配置转发，谨慎删除！\033[0m"
     echo "请输入要删除的转发规则序号，直接按回车返回主菜单。"
     read -p "选择: " choice
     if [ -z "$choice" ]; then
@@ -313,7 +314,7 @@ delete_forward() {
 
     # 删除start_line-1的空行并删除从 start_line 开始的 3 行
     sed -i "$((start_line-1))d;${start_line},$(($start_line+3))d" /opt/.realm/config.toml
-	# 删除配置查看文档第choice行转发
+	# 删除配置查看文档第choice-1行转发
 	sed -i "$((choice-1))d" $RAW_CONF_PATH
 
     echo "转发规则已删除。"
@@ -454,53 +455,56 @@ show_all_conf() {
     echo -e "--------------------------------------------------------"
     echo -e "序号|方法\t    |本地端口\t|目的地地址:目的地端口"
     echo -e "--------------------------------------------------------"
-	
-	count_line=$(awk 'END{print NR}' $RAW_CONF_PATH)
-    for ((i = 1; i <= $count_line; i++)); do
-    trans_conf=$(sed -n "${i}p" $RAW_CONF_PATH)
-    eachconf_retrieve
-
-    if [ "$is_encrypt" == "nonencrypt" ]; then
-      str="不加密中转"
-    elif [ "$is_encrypt" == "encrypttls" ]; then
-      str=" tls隧道 "
-    elif [ "$is_encrypt" == "encryptws" ]; then
-      str="  ws隧道 "
-    elif [ "$is_encrypt" == "encryptwss" ]; then
-      str=" wss隧道 "
-    elif [ "$is_encrypt" == "peerno" ]; then
-      str=" 不加密均衡负载 "
-    elif [ "$is_encrypt" == "peertls" ]; then
-      str=" tls隧道均衡负载 "
-    elif [ "$is_encrypt" == "peerws" ]; then
-      str="  ws隧道均衡负载 "
-    elif [ "$is_encrypt" == "peerwss" ]; then
-      str=" wss隧道均衡负载 "
-    elif [ "$is_encrypt" == "decrypttls" ]; then
-      str=" tls解密 "
-    elif [ "$is_encrypt" == "decryptws" ]; then
-      str="  ws解密 "
-    elif [ "$is_encrypt" == "decryptwss" ]; then
-      str=" wss解密 "
-    elif [ "$is_encrypt" == "ss" ]; then
-      str="   ss   "
-    elif [ "$is_encrypt" == "socks" ]; then
-      str=" socks5 "
-    elif [ "$is_encrypt" == "http" ]; then
-      str=" http "
-    elif [ "$is_encrypt" == "cdnno" ]; then
-      str="不加密转发CDN"
-    elif [ "$is_encrypt" == "cdnws" ]; then
-      str="ws隧道转发CDN"
-    elif [ "$is_encrypt" == "cdnwss" ]; then
-      str="wss隧道转发CDN"
-    else
-      str=""
+    
+    if [[ ! -f "$RAW_CONF_PATH" ]]; then
+        echo "Error: RAW_CONF_PATH file does not exist"
+        exit 1
     fi
-	
-    echo -e " $i  |$str    |$s_port\t|$d_ip:$d_port"
-    echo -e "--------------------------------------------------------"
+    
+    count_line=$(awk 'END{print NR}' $RAW_CONF_PATH)
+    if [[ -z "$count_line" || "$count_line" -le 0 ]]; then
+        echo "Error: No lines in configuration file"
+        exit 1
+    fi
+
+    for ((i = 1; i <= count_line; i++)); do
+        trans_conf=$(sed -n "${i}p" $RAW_CONF_PATH)
+        
+        if [[ -z "$trans_conf" || ! "$trans_conf" =~ "#" ]]; then
+            echo "Error: Invalid format at line $i"
+            continue
+        fi
+
+        # String extraction
+        eachconf_retrieve
+
+        # Determine encryption method
+        case "$is_encrypt" in
+             "nonencrypt") str="不加密中转" ;;
+             "encrypttls") str=" tls隧道 " ;;
+             "encryptws") str="  ws隧道 " ;;
+             "encryptwss") str=" wss隧道 " ;;
+             "peerno") str=" 不加密均衡负载 " ;;
+             "peertls") str=" tls隧道均衡负载 " ;;
+             "peerws") str="  ws隧道均衡负载 " ;;
+             "peerwss") str=" wss隧道均衡负载 " ;;
+             "decrypttls") str=" tls解密 " ;;
+             "decryptws") str="  ws解密 " ;;
+             "decryptwss") str=" wss解密 " ;;
+             "ss") str="   ss   " ;;
+             "socks") str=" socks5 " ;;
+             "http") str=" http " ;;
+             "cdnno") str="不加密转发CDN" ;;
+             "cdnws") str="ws隧道转发CDN" ;;
+             "cdnwss") str="wss隧道转发CDN" ;;
+             *) str="" ;;
+        esac
+        
+        # Print the formatted output
+        printf " %d  | %-15s    | %-10s| %s\n" $i "$str" "$s_port" "$d_ip:$d_port"
+        echo -e "--------------------------------------------------------"
     done
+	read -p "Press Enter to exit..."
 }
 
 eachconf_retrieve() {
