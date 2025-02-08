@@ -6,7 +6,7 @@ green="\033[0;32m"
 plain="\033[0m"
 
 # 脚本版本
-sh_ver="1.1"
+sh_ver="1.3"
 
 # 初始化环境目录
 init_env() {
@@ -139,7 +139,7 @@ show_menu() {
     echo "6. 启动服务"
     echo "7. 停止服务"
     echo "8. 重启服务"
-    echo "9. 检测更新"
+    echo "9. realm服务检测更新"
     echo "10. 一键卸载"
     echo "11. 更新脚本"
     echo "0. 退出脚本"
@@ -416,37 +416,69 @@ restart_service() {
 
 # 更新realm
 update_realm() {
-    echo "> 检测并更新 realm"
-
     current_version=$(/opt/realm/realm --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-    tag_version=$(curl -Ls "https://api.github.com/repos/zhboner/realm/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-
-    if [[ -z "$tag_version" ]]; then
-        echo -e "${red}获取 realm 版本失败，可能是由于 GitHub API 限制，请稍后再试${plain}"
-        exit 1
+    echo "你的realm版本为:""$current_version"""
+    echo -n 是否更新\(y/n\)\:
+    read checknewnum
+    if test $checknewnum = "y"; then
+      echo "> 检测并更新 realm"
+	  
+      tag_version=$(curl -Ls "https://api.github.com/repos/zhboner/realm/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+	  
+      if [[ -z "$tag_version" ]]; then
+          echo -e "${red}获取 realm 版本失败，可能是由于 GitHub API 限制，请稍后再试${plain}"
+          exit 1
+      fi
+	  
+      if [[ "$current_version" == "$tag_version" ]]; then
+          echo "当前已经是最新版本: ${current_version}"
+          return
+      fi
+	  
+      echo -e "获取到 realm 最新版本: ${tag_version}，开始安装..."
+	  
+	  # 获取架构
+      arch=$(uname -m)
+	  case "$arch" in
+        x86_64) arch="x86_64" ;;
+        aarch64) arch="arm64" ;;
+        armv7l) arch="armv7" ;;
+        *) echo "不支持的架构: $arch"; exit 1 ;;
+      esac
+	  
+	  download_url="https://github.com/zhboner/realm/releases/download/${tag_version}/realm-${arch}-unknown-linux-gnu.tar.gz"
+	  rm -f realm-${tag_version}.tar.gz
+	  #备份realm文件
+	  mkdir -p /opt/realm_bak/$(date +%Y%m%d) && cp -r /opt/realm/* /opt/realm_bak/$(date +%Y%m%d)/
+	  rm -f /opt/realm/*
+	  # 下载 realm
+	  wget --timeout=30 --tries=3 --no-check-certificate -O /opt/realm/realm-${tag_version}.tar.gz "$download_url"
+      #wget -N --no-check-certificate -O /opt/realm/realm.tar.gz "https://github.com/zhboner/realm/releases/download/${tag_version}/realm-${arch}-unknown-linux-gnu.tar.gz"
+      
+      if [[ $? -ne 0 ]]; then
+          echo -e "${red}下载 realm 失败，请确保您的服务器可以访问 GitHub${plain}"
+          exit 1
+      fi
+	  
+	  # 检查文件是否为 tar 归档
+      if ! file /opt/realm/realm-${tag_version}.tar.gz | grep -q "gzip compressed data"; then
+          echo "下载的 realm-${tag_version}.tar.gz 文件不是有效的 tar 归档"
+          exit 1
+      fi
+	  
+	  # 解压
+      cd /opt/realm || exit 1
+      tar -xvf realm-${tag_version}.tar.gz
+      chmod +x /opt/realm/realm
+	  rm -f /opt/realm_bak/$(date +%Y%m%d)/realm-${tag_version}.tar.gz
+	  
+      update_realm_status
+	  read -p "realm 更新成功。按任意键重启realm服务"
+	  # 重启服务
+      restart_service
+	else
+      return
     fi
-
-    if [[ "$current_version" == "$tag_version" ]]; then
-        echo "当前已经是最新版本: ${current_version}"
-        return
-    fi
-
-    echo -e "获取到 realm 最新版本: ${tag_version}，开始安装..."
-
-    arch=$(uname -m)
-    wget -N --no-check-certificate -O /opt/realm/realm.tar.gz "https://github.com/zhboner/realm/releases/download/${tag_version}/realm-${arch}-unknown-linux-gnu.tar.gz"
-    
-    if [[ $? -ne 0 ]]; then
-        echo -e "${red}下载 realm 失败，请确保您的服务器可以访问 GitHub${plain}"
-        exit 1
-    fi
-
-    cd /opt/realm
-    tar -xvf realm.tar.gz
-    chmod +x realm
-
-    echo -e "realm 更新成功。"
-    update_realm_status
 }
 
 # 查看现有realm转发配置
