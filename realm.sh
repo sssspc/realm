@@ -6,7 +6,7 @@ green="\033[0;32m"
 plain="\033[0m"
 
 # 脚本版本
-sh_ver="1.3"
+sh_ver="1.4"
 
 # 初始化环境目录
 init_env() {
@@ -317,7 +317,7 @@ delete_forward() {
 	# 删除配置查看文档第choice-1行转发
 	sed -i "$((choice-1))d" $RAW_CONF_PATH
 
-    echo "转发规则已删除。"
+    echo "转发规则已删除，重启realm服务后生效。"
 }
 
 # 添加转发规则
@@ -334,6 +334,8 @@ remote = \"$ip:$port2\"" >> /opt/.realm/config.toml
 
         read -e -p "是否继续添加转发规则(Y/N)? " answer
         if [[ $answer != "Y" && $answer != "y" ]]; then
+		    # 重启服务
+            restart_service
             break
         fi
     done
@@ -383,9 +385,11 @@ add_port_range_forward() {
 [[endpoints]]
 listen = \"0.0.0.0:$port\"
 remote = \"$ip:$remote_port\"" >> /opt/.realm/config.toml
+       #写入查看规则配置文件
+       echo "nonencrypt""/""$port""#""$ip""#""$remote_port" >>$RAW_CONF_PATH
     done
 
-    echo "端口段转发规则已添加。"
+    echo "端口段转发规则已添加，重启realm服务后生效。"
 }
 
 # 启动服务
