@@ -45,7 +45,7 @@ accept_proxy_timeout = 5
 # remote = "目标机ip:目标端口"
 
 [[endpoints]]
-listen = "0.0.0.0:1234"
+listen = "0.0.0.0:15678"
 remote = "1.1.1.1:443"
 ```
 ## 如需其他更多配置请参考官方文档： https://github.com/zhboner/realm
