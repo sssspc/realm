@@ -399,24 +399,24 @@ start_service() {
     systemctl daemon-reload
     systemctl restart realm.service
     systemctl enable realm.service
-    echo "realm服务已启动并设置为开机自启。"
     check_realm_service_status
+	echo "realm服务已启动并设置为开机自启。"
 }
 
 # 停止服务
 stop_service() {
     systemctl stop realm.service
     systemctl disable realm.service
-    echo "realm服务已停止并已禁用开机自启。"
     check_realm_service_status
+	echo "realm服务已停止并已禁用开机自启。"
 }
 
 # 重启服务
 restart_service() {
     systemctl daemon-reload
     systemctl restart realm.service
-    echo "realm服务已重启。"
     check_realm_service_status
+	echo "realm服务已重启。"
 }
 
 # 更新realm
