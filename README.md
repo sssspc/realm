@@ -3,8 +3,8 @@
 ## 脚本界面预览：
 
 ```
-欢迎使用realm一键转发脚本[1.4]
-      2025.04.11
+欢迎使用realm一键转发脚本[1.4.1]
+      2025.04.23
 ============================
 1.  部署环境
 2.  添加转发
@@ -24,7 +24,7 @@ realm 转发状态：启用
 ```
 ## 一键脚本：
 ```
-curl -L https://github.com/sssspc/realm/releases/download/v1.4/realm.sh -o realm.sh && chmod +x realm.sh &&  ./realm.sh
+curl -L https://github.com/sssspc/realm/releases/download/v1.4.1/realm.sh -o realm.sh && chmod +x realm.sh &&  ./realm.sh
 ```
 ## 默认配置文件（脚本在首次部署环境时会自动添加）
 ```
