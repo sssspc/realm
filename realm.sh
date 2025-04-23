@@ -130,7 +130,7 @@ show_menu() {
     update_realm_status
     check_realm_service_status
     echo -e "欢迎使用realm一键转发脚本${red}[${sh_ver}]${plain}"
-	echo "          2025.04.11            "
+	echo "          2025.04.23            "
     echo "================================"
     echo "1.  部署环境"
     echo "2.  添加realm转发"
