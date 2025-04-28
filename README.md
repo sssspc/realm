@@ -1,10 +1,11 @@
 ## realm
-参考自https://github.com/wcwq98/realm，https://github.com/zeroornull/doc/blob/master/docs/MJJ/Realm%E7%AB%AF%E5%8F%A3%E8%BD%AC%E5%8F%91%E5%B7%A5%E5%85%B7%E5%AE%89%E8%A3%85%E6%95%99%E7%A8%8B.md
+参考自https://github.com/wcwq98/realm,
+https://github.com/zeroornull/doc/blob/master/docs/MJJ/Realm%E7%AB%AF%E5%8F%A3%E8%BD%AC%E5%8F%91%E5%B7%A5%E5%85%B7%E5%AE%89%E8%A3%85%E6%95%99%E7%A8%8B.md
 ## 脚本界面预览：
 
 ```
-欢迎使用realm一键转发脚本[1.4.1]
-      2025.04.23
+欢迎使用realm一键转发脚本[1.4.2]
+      2025.04.28
 ============================
 1.  部署环境
 2.  添加转发
@@ -24,7 +25,7 @@ realm 转发状态：启用
 ```
 ## 一键脚本：
 ```
-curl -L https://github.com/sssspc/realm/releases/download/v1.4.1/realm.sh -o realm.sh && chmod +x realm.sh &&  ./realm.sh
+curl -L https://github.com/sssspc/realm/releases/download/v1.4.2/realm.sh -o realm.sh && chmod +x realm.sh &&  ./realm.sh
 ```
 ## 默认配置文件（脚本在首次部署环境时会自动添加）
 ```
