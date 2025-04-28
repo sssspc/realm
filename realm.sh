@@ -6,7 +6,7 @@ green="\033[0;32m"
 plain="\033[0m"
 
 # 脚本版本
-sh_ver="1.4.1"
+sh_ver="1.4.2"
 
 # 初始化环境目录
 init_env() {
@@ -130,7 +130,7 @@ show_menu() {
     update_realm_status
     check_realm_service_status
     echo -e "欢迎使用realm一键转发脚本${red}[${sh_ver}]${plain}"
-	echo "          2025.04.23            "
+	echo "          2025.04.28            "
     echo "================================"
     echo "1.  部署环境"
     echo "2.  添加realm转发"
@@ -319,6 +319,7 @@ delete_forward() {
 	sed -i "$((choice-1))d" $RAW_CONF_PATH
 
     echo "转发规则已删除，重启realm服务后生效。"
+	read -p "Press Enter to next..."
 }
 
 # 添加转发规则
@@ -391,6 +392,7 @@ remote = \"$ip:$remote_port\"" >> /opt/.realm/config.toml
     done
 
     echo "端口段转发规则已添加，重启realm服务后生效。"
+	read -p "Press Enter to next..."
 }
 
 # 启动服务
@@ -401,6 +403,7 @@ start_service() {
     systemctl enable realm.service
     check_realm_service_status
 	echo "realm服务已启动并设置为开机自启。"
+	sleep 3
 }
 
 # 停止服务
@@ -409,6 +412,7 @@ stop_service() {
     systemctl disable realm.service
     check_realm_service_status
 	echo "realm服务已停止并已禁用开机自启。"
+	sleep 3
 }
 
 # 重启服务
@@ -417,6 +421,7 @@ restart_service() {
     systemctl restart realm.service
     check_realm_service_status
 	echo "realm服务已重启。"
+	sleep 3
 }
 
 # 更新realm
