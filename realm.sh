@@ -7,6 +7,8 @@ plain="\033[0m"
 
 # 脚本版本
 sh_ver="1.4.2"
+# 倒计时常量
+countdown_seconds=3
 
 # 初始化环境目录
 init_env() {
@@ -402,8 +404,12 @@ start_service() {
     systemctl restart realm.service
     systemctl enable realm.service
     check_realm_service_status
-	echo "realm服务已启动并设置为开机自启。"
-	sleep 3
+    echo "服务启动倒计时："
+    for i in $(seq $countdown_seconds -1 1); do
+        echo -ne "还剩 $i 秒...\r"
+        sleep 1
+    done
+    echo -ne "realm服务已启动并设置为开机自启。       \n"
 }
 
 # 停止服务
@@ -420,8 +426,12 @@ restart_service() {
     systemctl daemon-reload
     systemctl restart realm.service
     check_realm_service_status
-	echo "realm服务已重启。"
-	sleep 3
+    echo "服务重启倒计时："
+    for i in $(seq $countdown_seconds -1 1); do
+        echo -ne "还剩 $i 秒...\r"
+        sleep 1
+    done
+    echo -ne "realm服务已重启。       \n"
 }
 
 # 更新realm
