@@ -6,7 +6,7 @@ green="\033[0;32m"
 plain="\033[0m"
 
 # 脚本版本
-sh_ver="1.4.2"
+sh_ver="1.4.3"
 # 倒计时常量
 countdown_seconds=3
 
@@ -87,7 +87,7 @@ Update_Shell() {
         return 0
     fi
     
-    echo -e "发现新版本 [ ${sh_new_ver} ]，是否更新？[Y/n]"
+    echo -e "当前脚本版本为 [ ${sh_ver} ]   发现新版本 [ ${sh_new_ver} ]，是否更新？[Y/n]"
     read -p "(默认: y): " yn
     yn=${yn:-y}
     if [[ ${yn} =~ ^[Yy]$ ]]; then
