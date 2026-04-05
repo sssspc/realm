@@ -4,8 +4,8 @@ https://github.com/zeroornull/doc/blob/master/docs/MJJ/Realm%E7%AB%AF%E5%8F%A3%E
 ## 脚本界面预览：
 
 ```
-欢迎使用realm一键转发脚本[1.4.2]
-      2025.04.28
+欢迎使用realm一键转发脚本[1.4.3]
+      2026.04.05
 ============================
 1.  部署环境
 2.  添加转发
