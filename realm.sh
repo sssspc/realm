@@ -437,13 +437,12 @@ restart_service() {
 # 更新realm
 update_realm() {
     current_version=$(/opt/realm/realm --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-    echo "你的realm版本为:""$current_version"""
+	tag_version=$(curl -Ls "https://api.github.com/repos/zhboner/realm/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    echo "您的realm版本为:""$current_version""  最新realm版本为：""$tag_version"""
     echo -n 是否更新\(y/n\)\:
     read checknewnum
     if test $checknewnum = "y"; then
       echo "> 检测并更新 realm"
-	  
-      tag_version=$(curl -Ls "https://api.github.com/repos/zhboner/realm/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 	  
       if [[ -z "$tag_version" ]]; then
           echo -e "${red}获取 realm 版本失败，可能是由于 GitHub API 限制，请稍后再试${plain}"
