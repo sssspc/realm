@@ -1,208 +1,114 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Realm relay manager for Debian / Ubuntu (systemd)
+# Version: 2.0.1
+set -Eeuo pipefail
 
-# 定义颜色变量
-red="\033[0;31m"
-green="\033[0;32m"
-plain="\033[0m"
+SCRIPT_VERSION="2.0.1"
+SCRIPT_URL="https://raw.githubusercontent.com/sssspc/realm/main/realm.sh"
+REALM_REPO="zhboner/realm"
+REALM_DIR="/opt/realm"
+STATE_DIR="/opt/.realm"
+CONFIG_PATH="${STATE_DIR}/config.toml"
+BACKUP_DIR="${STATE_DIR}/backups"
+SERVICE_FILE="/etc/systemd/system/realm.service"
+REALM_BIN="${REALM_DIR}/realm"
+TMP_DIR=""
 
-# 脚本版本
-sh_ver="1.4.3"
-# 倒计时常量
-countdown_seconds=3
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; RESET='\033[0m'
 
-# 初始化环境目录
-init_env() {
-    mkdir -p /opt/realm
-    mkdir -p /opt/.realm
+msg()  { printf '%b\n' "$*"; }
+ok()   { msg "${GREEN}[成功]${RESET} $*"; }
+warn() { msg "${YELLOW}[提示]${RESET} $*"; }
+err()  { msg "${RED}[错误]${RESET} $*" >&2; }
+die()  { err "$*"; exit 1; }
+
+cleanup() { [[ -n "${TMP_DIR:-}" && -d "$TMP_DIR" ]] && rm -rf -- "$TMP_DIR"; }
+trap cleanup EXIT
+trap 'err "脚本在第 ${LINENO} 行执行失败：${BASH_COMMAND}"' ERR
+
+require_root() { [[ ${EUID} -eq 0 ]] || die "请使用 root 或 sudo 运行此脚本。"; }
+
+check_platform() {
+    [[ -r /etc/os-release ]] || die "无法识别系统类型。"
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    case "${ID:-}" in debian|ubuntu) ;; *) warn "当前系统为 ${PRETTY_NAME:-未知系统}；本脚本主要面向 Debian / Ubuntu。" ;; esac
+    command -v systemctl >/dev/null 2>&1 || die "未检测到 systemd/systemctl，本脚本不支持当前服务管理环境。"
+    systemctl is-system-running >/dev/null 2>&1 || {
+        local state
+        state=$(systemctl is-system-running 2>/dev/null || true)
+        [[ "$state" == "degraded" ]] || warn "systemd 当前状态：${state:-unknown}，请确认服务管理正常。"
+    }
 }
 
-# 配置文件路径
-CONFIG_PATH="/opt/.realm/config.toml"
-RAW_CONF_PATH="/opt/.realm/rawconf"
-
-# 处理命令行参数
-while getopts "l:r:" opt; do
-  case $opt in
-    l)
-      listen_ip_port="$OPTARG"
-      ;;
-    r)
-      remote_ip_port="$OPTARG"
-      ;;
-    *)
-      echo "Usage: $0 [-l listen_ip:port] [-r remote_ip:port]"
-      exit 1
-      ;;
-  esac
-done
-
-# 如果提供了 -l 和 -r 参数，追加配置到 config.toml
-if [ -n "$listen_ip_port" ] && [ -n "$remote_ip_port" ]; then
-    echo "配置中转机 IP 和端口为: $listen_ip_port"
-    echo "配置落地机 IP 和端口为: $remote_ip_port"
-
-    cat <<EOF >> "$CONFIG_PATH"
-
-[[endpoints]]
-listen = "$listen_ip_port"
-remote = "$remote_ip_port"
-EOF
-    echo "配置已追加，listen = $listen_ip_port，remote = $remote_ip_port"
-    exit 0
-fi
-
-# 更新realm状态
-update_realm_status() {
-    if [ -f "/opt/realm/realm" ]; then
-        realm_status="已安装"
-        realm_status_color=$green
-    else
-        realm_status="未安装"
-        realm_status_color=$red
-    fi
-}
-
-# 检查realm服务状态
-check_realm_service_status() {
-    if systemctl is-active --quiet realm; then
-        realm_service_status="启用"
-        realm_service_status_color=$green
-    else
-        realm_service_status="未启用"
-        realm_service_status_color=$red
-    fi
-}
-
-# 更新脚本
-Update_Shell() {
-    echo -e "当前脚本版本为 [ ${sh_ver} ]，开始检测最新版本..."
-    sh_new_ver=$(wget --no-check-certificate -qO- "https://raw.githubusercontent.com/sssspc/realm/main/realm.sh" | grep 'sh_ver="' | awk -F "=" '{print $NF}' | sed 's/\"//g' | head -1)
-    if [[ -z ${sh_new_ver} ]]; then
-        echo -e "${red}检测最新版本失败！请检查网络或稍后再试。${plain}"
-        return 1
-    fi
-    
-    if [[ ${sh_new_ver} == ${sh_ver} ]]; then
-        echo -e "当前已是最新版本 [ ${sh_new_ver} ]！"
-        return 0
-    fi
-    
-    echo -e "当前脚本版本为 [ ${sh_ver} ]   发现新版本 [ ${sh_new_ver} ]，是否更新？[Y/n]"
-    read -p "(默认: y): " yn
-    yn=${yn:-y}
-    if [[ ${yn} =~ ^[Yy]$ ]]; then
-        wget -N --no-check-certificate https://raw.githubusercontent.com/sssspc/realm/main/realm.sh -O realm.sh
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载脚本失败，请检查网络连接！${plain}"
-            return 1
-        fi
-        chmod +x realm.sh
-        echo -e "脚本已更新为最新版本 [ ${sh_new_ver} ]！"
-        exec bash realm.sh
-    else
-        echo -e "已取消更新。"
-    fi
-}
-
-# 检查依赖
 check_dependencies() {
-    echo "正在检查当前环境依赖"
-    local dependencies=("wget" "tar" "systemctl" "sed" "grep" "curl" "unzip")
-
-    for dep in "${dependencies[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            echo "正在安装 $dep..."
-            if [ -x "$(command -v apt-get)" ]; then
-                apt-get update && apt-get install -y "$dep"
-            elif [ -x "$(command -v yum)" ]; then
-                yum install -y "$dep"
-            else
-                echo "无法安装 $dep。请手动安装后重试。"
-                exit 1
-            fi
-        fi
+    local missing=() p
+    for p in curl tar awk sed grep install id useradd getent; do
+        command -v "$p" >/dev/null 2>&1 || missing+=("$p")
     done
-
-    echo "所有依赖已满足。"
-}
-
-# 显示菜单的函数
-show_menu() {
-    clear
-    update_realm_status
-    check_realm_service_status
-    echo -e "欢迎使用realm一键转发脚本${red}[${sh_ver}]${plain}"
-	echo "          2026.04.05            "
-    echo "================================"
-    echo "1.  部署环境"
-    echo "2.  添加realm转发"
-    echo "3.  添加端口段realm转发"
-    echo "4.  查看您添加的现有realm配置"
-    echo "5.  删除转发"
-    echo "6.  启动服务"
-    echo "7.  停止服务"
-    echo "8.  重启服务"
-    echo "9.  realm服务检测更新"
-    echo "10. 一键卸载"
-    echo "11. 更新脚本"
-    echo "0.  退出脚本"
-    echo "================================"
-    echo -e "realm 状态：${realm_status_color}${realm_status}${plain}"
-    echo -e "realm 转发状态：${realm_service_status_color}${realm_service_status}${plain}"
-}
-
-# 部署环境的函数
-deploy_realm() {
-    mkdir -p /opt/realm
-    cd /opt/realm
-
-    _version=$(curl -s https://api.github.com/repos/zhboner/realm/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-
-    if [ -z "$_version" ]; then
-        echo "获取版本号失败，请检查本机能否链接 https://api.github.com/repos/zhboner/realm/releases/latest"
-        return 1
-    else
-        echo "当前最新版本为: ${_version}"
+    if ((${#missing[@]})); then
+        apt-get update
+        # systemd / id / awk 等通常由基础系统提供；仅安装常用下载和归档工具
+        apt-get install -y curl tar gawk sed grep coreutils passwd
     fi
+    for p in curl tar awk sed grep install id useradd getent; do
+        command -v "$p" >/dev/null 2>&1 || die "缺少必要命令：$p"
+    done
+}
 
-    arch=$(uname -m)
-    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+init_env() {
+    install -d -m 0755 "$REALM_DIR"
+    install -d -m 0750 -o root -g realm "$STATE_DIR" 2>/dev/null || install -d -m 0750 "$STATE_DIR"
+    install -d -m 0700 "$BACKUP_DIR"
+}
 
-    case "$arch-$os" in
-        x86_64-linux)
-            download_url="https://github.com/zhboner/realm/releases/download/${_version}/realm-x86_64-unknown-linux-gnu.tar.gz"
-            ;;
-        x86_64-darwin)
-            download_url="https://github.com/zhboner/realm/releases/download/${_version}/realm-x86_64-apple-darwin.tar.gz"
-            ;;
-        aarch64-linux)
-            download_url="https://github.com/zhboner/realm/releases/download/${_version}/realm-aarch64-unknown-linux-gnu.tar.gz"
-            ;;
-        aarch64-darwin)
-            download_url="https://github.com/zhboner/realm/releases/download/${_version}/realm-aarch64-apple-darwin.tar.gz"
-            ;;
-        arm-linux)
-            download_url="https://github.com/zhboner/realm/releases/download/${_version}/realm-arm-unknown-linux-gnueabi.tar.gz"
-            ;;
-        armv7-linux)
-            download_url="https://github.com/zhboner/realm/releases/download/${_version}/realm-armv7-unknown-linux-gnueabi.tar.gz"
-            ;;
-        *)
-            echo "不支持的架构: $arch-$os"
-            return
-            ;;
-    esac
+ensure_realm_user() {
+    if ! getent group realm >/dev/null 2>&1; then groupadd --system realm; fi
+    if ! id realm >/dev/null 2>&1; then
+        useradd --system --gid realm --home-dir /nonexistent --shell /usr/sbin/nologin realm
+    fi
+    chown root:realm "$STATE_DIR"
+    chmod 0750 "$STATE_DIR"
+    if [[ -f "$CONFIG_PATH" ]]; then chown root:realm "$CONFIG_PATH"; chmod 0640 "$CONFIG_PATH"; fi
+}
 
-    wget -O "/opt/realm/realm-${_version}.tar.gz" "$download_url"
-    tar -xvf "/opt/realm/realm-${_version}.tar.gz" -C /opt/realm/
-    chmod +x /opt/realm/realm
+backup_config() {
+    [[ -f "$CONFIG_PATH" ]] || return 0
+    local stamp
+    stamp=$(date +%Y%m%d_%H%M%S)
+    cp -a -- "$CONFIG_PATH" "${BACKUP_DIR}/config_${stamp}.toml"
+    chmod 0600 "${BACKUP_DIR}/config_${stamp}.toml"
+}
 
-    # 创建 config.toml 模板
-    mkdir -p /opt/.realm    
-    cat <<EOF > "$CONFIG_PATH"
+atomic_write_config() {
+    local candidate="$1"
+    [[ -s "$candidate" ]] || die "拒绝写入空配置文件。"
+    # Python 3.11+ 可用 tomllib 做 TOML 语法校验；若没有则保留基本格式校验。
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$candidate" <<'PY'
+import sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    raise SystemExit(0)
+with open(sys.argv[1], 'rb') as f:
+    tomllib.load(f)
+PY
+    fi
+    backup_config
+    local tmp="${CONFIG_PATH}.tmp.$$"
+    install -o root -g realm -m 0640 "$candidate" "$tmp"
+    mv -f -- "$tmp" "$CONFIG_PATH"
+    chown root:realm "$CONFIG_PATH"
+    chmod 0640 "$CONFIG_PATH"
+}
+
+ensure_config() {
+    if [[ ! -f "$CONFIG_PATH" ]]; then
+        cat >"$CONFIG_PATH" <<'TOML'
 [network]
-no_tcp = false #是否关闭tcp转发
-use_udp = true #是否开启udp转发
+no_tcp = false
+use_udp = true
 zero_copy = true
 fast_open = true
 tcp_timeout = 300
@@ -211,387 +117,543 @@ send_proxy = false
 send_proxy_version = 2
 accept_proxy = false
 accept_proxy_timeout = 5
+TOML
+        chown root:realm "$CONFIG_PATH" 2>/dev/null || true
+        chmod 0640 "$CONFIG_PATH"
+    fi
+}
 
-#参考模板
-# [[endpoints]]
-# listen = "0.0.0.0:本地端口"
-# remote = "目标机ip:目标端口"
+get_latest_version() {
+    local json version
+    json=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/${REALM_REPO}/releases/latest") || return 1
+    version=$(printf '%s' "$json" | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -n1)
+    [[ -n "$version" ]] || return 1
+    printf '%s' "$version"
+}
 
-[[endpoints]]
-listen = "0.0.0.0:15678"
-remote = "1.1.1.1:443"
-EOF
+get_asset_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) printf 'x86_64' ;;
+        aarch64|arm64) printf 'aarch64' ;;
+        armv7l|armv7*) printf 'armv7' ;;
+        armv6l) printf 'arm' ;;
+        *) return 1 ;;
+    esac
+}
 
-    echo "[Unit]
-Description=realm
+asset_url_for() {
+    local version="$1" arch="$2" suffix
+    case "$arch" in
+        x86_64) suffix="x86_64-unknown-linux-gnu" ;;
+        aarch64) suffix="aarch64-unknown-linux-gnu" ;;
+        armv7) suffix="armv7-unknown-linux-gnueabi" ;;
+        arm) suffix="arm-unknown-linux-gnueabi" ;;
+        *) return 1 ;;
+    esac
+    printf 'https://github.com/%s/releases/download/%s/realm-%s.tar.gz' "$REALM_REPO" "$version" "$suffix"
+}
+
+fetch_realm_binary() {
+    local version="$1" arch="$2" url archive extract_dir binary
+    url=$(asset_url_for "$version" "$arch") || die "不支持的架构：$arch"
+    [[ -n "${TMP_DIR:-}" ]] || TMP_DIR=$(mktemp -d /tmp/realm-install.XXXXXX)
+    archive="${TMP_DIR}/realm.tar.gz"
+    extract_dir="${TMP_DIR}/extract"
+    mkdir -p "$extract_dir"
+    msg "下载 Realm ${version}（${arch}）..." >&2
+    curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 300 "$url" -o "$archive" || die "Realm 下载失败，旧版本未受影响。"
+    tar -tzf "$archive" >/dev/null 2>&1 || die "下载文件不是有效的 gzip tar 压缩包。"
+    tar -xzf "$archive" -C "$extract_dir" || die "Realm 压缩包解压失败。"
+    binary=$(find "$extract_dir" -type f -name realm -perm /111 -print -quit)
+    [[ -n "$binary" ]] || binary=$(find "$extract_dir" -type f -name realm -print -quit)
+    [[ -n "$binary" ]] || die "压缩包中没有找到 realm 可执行文件。"
+    chmod 0755 "$binary"
+    "$binary" --version >/dev/null 2>&1 || die "下载的 Realm 二进制文件无法正常执行，取消替换。"
+    FETCHED_BINARY="$binary"
+}
+
+install_service() {
+    ensure_realm_user
+    cat >"${SERVICE_FILE}.tmp" <<EOF_SERVICE
+[Unit]
+Description=Realm TCP/UDP Relay
+Wants=network-online.target
 After=network-online.target
-Wants=network-online.target systemd-networkd-wait-online.service
 
 [Service]
 Type=simple
-User=root
+User=realm
+Group=realm
+WorkingDirectory=${REALM_DIR}
+ExecStart=${REALM_BIN} -c ${CONFIG_PATH}
 Restart=on-failure
 RestartSec=5s
-DynamicUser=true
-WorkingDirectory=/opt/realm
-ExecStart=/opt/realm/realm -c /opt/.realm/config.toml
+LimitNOFILE=1048576
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=${CONFIG_PATH}
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
-WantedBy=multi-user.target" > /etc/systemd/system/realm.service
-
+WantedBy=multi-user.target
+EOF_SERVICE
+    install -o root -g root -m 0644 "${SERVICE_FILE}.tmp" "$SERVICE_FILE"
+    rm -f "${SERVICE_FILE}.tmp"
     systemctl daemon-reload
-    update_realm_status
-    echo "部署完成。"
 }
 
-# 卸载realm
-uninstall_realm() {
-    systemctl stop realm
-    systemctl disable realm
-    rm -f /etc/systemd/system/realm.service
+service_installed() { [[ -x "$REALM_BIN" ]]; }
+service_active() { systemctl is-active --quiet realm.service; }
+
+restart_realm_checked() {
     systemctl daemon-reload
+    if ! systemctl restart realm.service; then
+        err "Realm 重启命令执行失败，最近日志如下："
+        systemctl status realm.service --no-pager -l || true
+        journalctl -u realm.service -n 60 --no-pager || true
+        return 1
+    fi
 
-    rm -f /opt/realm/realm
-    echo "realm已被卸载。"
+    # Realm 服务设置了 Restart=on-failure，给 systemd 一点时间完成启动或重试。
+    local attempt
+    for ((attempt=1; attempt<=10; attempt++)); do
+        if service_active; then
+            ok "Realm 服务运行正常。"
+            return 0
+        fi
+        sleep 1
+    done
 
-    read -e -p "是否删除配置文件 (Y/N, 默认N): " delete_config
-    delete_config=${delete_config:-N}
+    err "等待 10 秒后服务仍未处于 active 状态，最近日志如下："
+    systemctl status realm.service --no-pager -l || true
+    journalctl -u realm.service -n 60 --no-pager || true
+    return 1
+}
 
-    if [[ $delete_config == "Y" || $delete_config == "y" ]]; then
-        rm -rf /opt/realm
-        rm -rf /opt/.realm
-        echo "配置文件已删除。"
+rollback_realm() {
+    local backup="$1" rollback_tmp="${REALM_BIN}.rollback.$$"
+    [[ -s "$backup" ]] || { err "旧版本备份不存在或为空，无法自动回滚：$backup"; return 1; }
+
+    err "新版本启动失败，正在恢复旧版本……"
+    if ! install -o root -g root -m 0755 "$backup" "$rollback_tmp"; then
+        rm -f "$rollback_tmp"
+        err "复制旧版本失败，未能完成回滚。"
+        return 1
+    fi
+    if ! mv -f -- "$rollback_tmp" "$REALM_BIN"; then
+        rm -f "$rollback_tmp"
+        err "替换旧版本二进制失败，未能完成回滚。"
+        return 1
+    fi
+
+    if restart_realm_checked; then
+        ok "已自动回滚到旧版本并成功重启 Realm。"
+        return 0
+    fi
+
+    err "旧版本二进制已恢复，但服务仍未能启动。请检查上方日志；备份文件保留在：$backup"
+    return 1
+}
+
+install_or_update_realm() {
+    local version arch binary staged old_version backup_file="" was_active=0 was_enabled=0
+    version=$(get_latest_version) || die "获取 GitHub 最新版本失败，请检查网络或 API 限制。"
+    arch=$(get_asset_arch) || die "不支持的 CPU 架构：$(uname -m)"
+    msg "最新 Realm 版本：${version}；系统架构：${arch}"
+    TMP_DIR=$(mktemp -d /tmp/realm-install.XXXXXX)
+    fetch_realm_binary "$version" "$arch"
+    binary="$FETCHED_BINARY"
+    staged="${REALM_DIR}/realm.new.$$"
+    install -o root -g root -m 0755 "$binary" "$staged"
+    "$staged" --version >/dev/null 2>&1 || { rm -f "$staged"; die "安装前二次检查失败。"; }
+
+    # 记录更新前的服务状态：原本未运行/未启用时，不擅自启动服务。
+    service_active && was_active=1 || true
+    systemctl is-enabled --quiet realm.service 2>/dev/null && was_enabled=1 || true
+
+    old_version=""
+    if service_installed; then
+        old_version=$("$REALM_BIN" --version 2>/dev/null || true)
+        if [[ -n "$old_version" ]]; then
+            backup_file="${BACKUP_DIR}/realm_$(date +%Y%m%d_%H%M%S)_$$"
+            cp -a -- "$REALM_BIN" "$backup_file" || die "旧版本备份失败，已取消更新。"
+            ok "旧版本已备份：$backup_file"
+        fi
+    fi
+
+    if ! mv -f -- "$staged" "$REALM_BIN"; then
+        rm -f "$staged"
+        die "替换 Realm 二进制失败，旧版本未主动删除。"
+    fi
+    chmod 0755 "$REALM_BIN"
+    ok "Realm 二进制文件已安装/更新：$version"
+    ensure_config
+    install_service
+    if [[ -f "$CONFIG_PATH" ]]; then
+        chown root:realm "$CONFIG_PATH"; chmod 0640 "$CONFIG_PATH"
+    fi
+
+    if ((was_enabled || was_active)); then
+        if ! restart_realm_checked; then
+            if [[ -n "$backup_file" ]]; then
+                rollback_realm "$backup_file" || warn "自动回滚未能恢复服务，请手动检查：systemctl status realm.service"
+            else
+                err "这是首次安装，没有可回滚的旧版本。"
+            fi
+            return 1
+        fi
+        ok "Realm 更新完成，新版本服务已正常启动。"
     else
-        echo "配置文件保留。"
+        warn "Realm 已安装/更新。更新前服务未运行且未启用，因此没有自动启动；可先配置转发规则，再从菜单启动服务。"
     fi
-
-    
 }
 
-# 删除转发规则的函数
-delete_forward() {
-    echo "当前转发规则："
-    local lines=($(grep -n 'remote =' /opt/.realm/config.toml | grep -v '#' | awk -F: '{print $1}'))
-    if [ ${#lines[@]} -eq 0 ]; then
-        echo "没有发现任何转发规则。"
-        return
-    fi
-    local index=1
-    for line_num in "${lines[@]}"; do
-        listen_line=$((line_num - 1))
-        listen_port=$(sed -n "${listen_line}p" /opt/.realm/config.toml | cut -d '"' -f 2)
-        remote_port=$(sed -n "${line_num}p" /opt/.realm/config.toml | cut -d '"' -f 2)
-        echo "${index}. 本地监听: ${listen_port} --> 远程目标: ${remote_port}"
-        let index+=1
-    done
-
-    echo -e "\033[31m请注意1.为默认配置转发，谨慎删除！\033[0m"
-    echo "请输入要删除的转发规则序号，直接按回车返回主菜单。"
-    read -p "选择: " choice
-    if [ -z "$choice" ]; then
-        echo "返回主菜单。"
-        return
-    fi
-
-    if ! [[ $choice =~ ^[0-9]+$ ]]; then
-        echo "无效输入，请输入数字。"
-        return
-    fi
-
-    if [ $choice -lt 1 ] || [ $choice -gt ${#lines[@]} ]; then
-        echo "选择超出范围，请输入有效序号。"
-        return
-    fi
-
-    local line_number=${lines[$((choice-1))]}
-
-    # 找到 [[endpoints]] 的起始行
-    local start_line=$line_number
-    while [ $start_line -ge 1 ]; do
-        local line_content=$(sed -n "${start_line}p" /opt/.realm/config.toml)
-        if [[ $line_content =~ \[\[endpoints\]\] ]]; then
-            break
-        fi
-        ((start_line--))
-    done
-
-    # 删除start_line-1的空行并删除从 start_line 开始的 3 行
-    sed -i "$((start_line-1))d;${start_line},$(($start_line+3))d" /opt/.realm/config.toml
-	# 删除配置查看文档第choice-1行转发
-	sed -i "$((choice-1))d" $RAW_CONF_PATH
-
-    echo "转发规则已删除，重启realm服务后生效。"
-	read -p "Press Enter to next..."
+validate_port() {
+    local p="$1"
+    [[ "$p" =~ ^[0-9]{1,5}$ ]] && ((10#$p >= 1 && 10#$p <= 65535))
 }
 
-# 添加转发规则
+validate_host() {
+    local host="$1"
+    [[ -n "$host" ]] || return 1
+    if [[ "$host" == *"["* || "$host" == *"]"* ]]; then
+        [[ "$host" == \[*\] ]] || return 1
+        host="${host:1:${#host}-2}"
+    fi
+    [[ -n "$host" && "$host" =~ ^[A-Za-z0-9._:%-]+$ ]]
+}
+
+format_remote() {
+    local host="$1" port="$2"
+    if [[ "$host" == *:* && "$host" != \[*\] ]]; then printf '[%s]:%s' "$host" "$port"; else printf '%s:%s' "$host" "$port"; fi
+}
+
+endpoint_exists() {
+    local listen="$1"
+    grep -Fq "listen = \"${listen}\"" "$CONFIG_PATH"
+}
+
+append_endpoint() {
+    local listen_port="$1" host="$2" remote_port="$3" candidate
+    local remote
+    remote=$(format_remote "$host" "$remote_port")
+    endpoint_exists "0.0.0.0:${listen_port}" && { err "本地端口 ${listen_port} 已存在，跳过。"; return 1; }
+    candidate=$(mktemp "${STATE_DIR}/config.XXXXXX")
+    cat "$CONFIG_PATH" >"$candidate"
+    cat >>"$candidate" <<EOF_ENDPOINT
+
+[[endpoints]]
+listen = "0.0.0.0:${listen_port}"
+remote = "${remote}"
+EOF_ENDPOINT
+    atomic_write_config "$candidate"
+    rm -f "$candidate"
+}
+
+read_single_rule() {
+    local listen_port host remote_port
+    read -r -p "本地监听端口：" listen_port
+    validate_port "$listen_port" || { err "本地端口必须为 1-65535 的整数。"; return 1; }
+    read -r -p "目标机 IP / 域名：" host
+    validate_host "$host" || { err "目标地址为空或包含非法字符。"; return 1; }
+    read -r -p "目标机端口：" remote_port
+    validate_port "$remote_port" || { err "目标端口必须为 1-65535 的整数。"; return 1; }
+    append_endpoint "$listen_port" "$host" "$remote_port"
+}
+
 add_forward() {
+    ensure_config
+    local answer
     while true; do
-	    read -e -p "请问你要将本机哪个端口接收到的流量进行转发?（port1）: " port1
-        read -e -p "请输入目标机的IP: " ip
-        read -e -p "请输入目标机端口（port2）: " port2
-        echo "
-[[endpoints]]
-listen = \"0.0.0.0:$port1\"
-remote = \"$ip:$port2\"" >> /opt/.realm/config.toml
-        rawconf
-
-        read -e -p "是否继续添加转发规则(Y/N)? " answer
-        if [[ $answer != "Y" && $answer != "y" ]]; then
-		    # 重启服务
-            restart_service
-            break
-        fi
+        read_single_rule || true
+        read -r -p "继续添加规则？[y/N]：" answer
+        [[ "$answer" =~ ^[Yy]$ ]] || break
     done
+    install_service
+    read -r -p "是否立即重启 Realm 使配置生效？[Y/n]：" answer
+    if [[ ! "$answer" =~ ^[Nn]$ ]]; then restart_realm_checked || true; fi
 }
 
-writerawconf() {
-    echo $flag_a"/""$flag_b""#""$flag_c""#""$flag_d" >>$RAW_CONF_PATH
-}
-
-rawconf() {
-    read_protocol
-    read_s_port
-    read_d_ip
-    read_d_port
-    writerawconf
-}
-
-read_protocol() {
-    flag_a="nonencrypt"
-}
-
-read_s_port() {
-    flag_b=$port1
-}
-
-read_d_ip() {
-    flag_c=$ip
-}
-
-read_d_port() {
-    flag_d=$port2
-}
-
-writerawconf() {
-    echo $flag_a"/""$flag_b""#""$flag_c""#""$flag_d" >>$RAW_CONF_PATH
-}
-
-# 添加端口段转发
 add_port_range_forward() {
-    read -e -p "请输入目标机的IP: " ip
-    read -e -p "请输入本地中转机的起始端口: " start_port
-    read -e -p "请输入本地中转机的截止端口: " end_port
-    read -e -p "请输入目标机端口: " remote_port
-
-    for ((port=$start_port; port<=$end_port; port++)); do
-        echo "
-[[endpoints]]
-listen = \"0.0.0.0:$port\"
-remote = \"$ip:$remote_port\"" >> /opt/.realm/config.toml
-       #写入查看规则配置文件
-       echo "nonencrypt""/""$port""#""$ip""#""$remote_port" >>$RAW_CONF_PATH
-    done
-
-    echo "端口段转发规则已添加，重启realm服务后生效。"
-	read -p "Press Enter to next..."
-}
-
-# 启动服务
-start_service() {
-    systemctl unmask realm.service
-    systemctl daemon-reload
-    systemctl restart realm.service
-    systemctl enable realm.service
-    check_realm_service_status
-    echo "服务启动倒计时："
-    for i in $(seq $countdown_seconds -1 1); do
-        echo -ne "还剩 $i 秒...\r"
-        sleep 1
-    done
-    echo -ne "realm服务已启动并设置为开机自启。       \n"
-}
-
-# 停止服务
-stop_service() {
-    systemctl stop realm.service
-    systemctl disable realm.service
-    check_realm_service_status
-	echo "realm服务已停止并已禁用开机自启。"
-	sleep 3
-}
-
-# 重启服务
-restart_service() {
-    systemctl daemon-reload
-    systemctl restart realm.service
-    check_realm_service_status
-    echo "服务重启倒计时："
-    for i in $(seq $countdown_seconds -1 1); do
-        echo -ne "还剩 $i 秒...\r"
-        sleep 1
-    done
-    echo -ne "realm服务已重启。       \n"
-}
-
-# 更新realm
-update_realm() {
-    current_version=$(/opt/realm/realm --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-	tag_version=$(curl -Ls "https://api.github.com/repos/zhboner/realm/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    echo "您的realm版本为:""$current_version""  最新realm版本为：""$tag_version"""
-    echo -n 是否更新\(y/n\)\:
-    read checknewnum
-    if test $checknewnum = "y"; then
-      echo "> 检测并更新 realm"
-	  
-      if [[ -z "$tag_version" ]]; then
-          echo -e "${red}获取 realm 版本失败，可能是由于 GitHub API 限制，请稍后再试${plain}"
-          exit 1
-      fi
-	  
-      if [[ "$current_version" == "$tag_version" ]]; then
-          echo "当前已经是最新版本: ${current_version}"
-          return
-      fi
-	  
-      echo -e "获取到 realm 最新版本: ${tag_version}，开始安装..."
-	  
-	  # 获取架构
-      arch=$(uname -m)
-	  case "$arch" in
-        x86_64) arch="x86_64" ;;
-        aarch64) arch="arm64" ;;
-        armv7l) arch="armv7" ;;
-        *) echo "不支持的架构: $arch"; exit 1 ;;
-      esac
-	  
-	  download_url="https://github.com/zhboner/realm/releases/download/${tag_version}/realm-${arch}-unknown-linux-gnu.tar.gz"
-	  rm -f realm-${tag_version}.tar.gz
-	  #备份realm文件
-	  mkdir -p /opt/realm_bak/$(date +%Y%m%d) && cp -r /opt/realm/* /opt/realm_bak/$(date +%Y%m%d)/
-	  rm -f /opt/realm/*
-	  # 下载 realm
-	  wget --timeout=30 --tries=3 --no-check-certificate -O /opt/realm/realm-${tag_version}.tar.gz "$download_url"
-      #wget -N --no-check-certificate -O /opt/realm/realm.tar.gz "https://github.com/zhboner/realm/releases/download/${tag_version}/realm-${arch}-unknown-linux-gnu.tar.gz"
-      
-      if [[ $? -ne 0 ]]; then
-          echo -e "${red}下载 realm 失败，请确保您的服务器可以访问 GitHub${plain}"
-          exit 1
-      fi
-	  
-	  # 检查文件是否为 tar 归档
-      if ! file /opt/realm/realm-${tag_version}.tar.gz | grep -q "gzip compressed data"; then
-          echo "下载的 realm-${tag_version}.tar.gz 文件不是有效的 tar 归档"
-          exit 1
-      fi
-	  
-	  # 解压
-      cd /opt/realm || exit 1
-      tar -xvf realm-${tag_version}.tar.gz
-      chmod +x /opt/realm/realm
-	  rm -f /opt/realm_bak/$(date +%Y%m%d)/realm-${tag_version}.tar.gz
-	  
-      update_realm_status
-	  read -p "realm 更新成功。按任意键重启realm服务"
-	  # 重启服务
-      restart_service
-	else
-      return
-    fi
-}
-
-# 查看现有realm转发配置
-show_all_conf() {
-    echo -e "                      realm 配置                        "
-    echo -e "--------------------------------------------------------"
-    echo -e "序号|方法\t    |本地端口\t|目的地地址:目的地端口"
-    echo -e "--------------------------------------------------------"
-    
-    if [[ ! -f "$RAW_CONF_PATH" ]]; then
-        echo "Error: RAW_CONF_PATH file does not exist"
-        exit 1
-    fi
-    
-    count_line=$(awk 'END{print NR}' $RAW_CONF_PATH)
-    if [[ -z "$count_line" || "$count_line" -le 0 ]]; then
-        echo "Error: No lines in configuration file"
-        exit 1
-    fi
-
-    for ((i = 1; i <= count_line; i++)); do
-        trans_conf=$(sed -n "${i}p" $RAW_CONF_PATH)
-        
-        if [[ -z "$trans_conf" || ! "$trans_conf" =~ "#" ]]; then
-            echo "Error: Invalid format at line $i"
-            continue
+    ensure_config
+    local host start_port end_port remote_start count i local_port remote_port answer
+    read -r -p "目标机 IP / 域名：" host
+    validate_host "$host" || { err "目标地址为空或包含非法字符。"; return 1; }
+    read -r -p "本地起始端口：" start_port
+    read -r -p "本地截止端口：" end_port
+    read -r -p "目标机起始端口：" remote_start
+    validate_port "$start_port" && validate_port "$end_port" && validate_port "$remote_start" || { err "端口必须为 1-65535 的整数。"; return 1; }
+    ((10#$start_port <= 10#$end_port)) || { err "本地起始端口不能大于截止端口。"; return 1; }
+    count=$((10#$end_port - 10#$start_port + 1))
+    ((10#$remote_start + count - 1 <= 65535)) || { err "目标端口段超出 65535。"; return 1; }
+    ((count <= 2000)) || { err "单次最多添加 2000 条规则，避免误操作。"; return 1; }
+    for ((i=0; i<count; i++)); do
+        local_port=$((10#$start_port + i))
+        remote_port=$((10#$remote_start + i))
+        if endpoint_exists "0.0.0.0:${local_port}"; then
+            err "本地端口 ${local_port} 已存在，整个端口段操作已取消。"
+            return 1
         fi
-
-        # String extraction
-        eachconf_retrieve
-
-        # Determine encryption method
-        case "$is_encrypt" in
-             "nonencrypt") str="不加密中转" ;;
-             "encrypttls") str=" tls隧道 " ;;
-             "encryptws") str="  ws隧道 " ;;
-             "encryptwss") str=" wss隧道 " ;;
-             "peerno") str=" 不加密均衡负载 " ;;
-             "peertls") str=" tls隧道均衡负载 " ;;
-             "peerws") str="  ws隧道均衡负载 " ;;
-             "peerwss") str=" wss隧道均衡负载 " ;;
-             "decrypttls") str=" tls解密 " ;;
-             "decryptws") str="  ws解密 " ;;
-             "decryptwss") str=" wss解密 " ;;
-             "ss") str="   ss   " ;;
-             "socks") str=" socks5 " ;;
-             "http") str=" http " ;;
-             "cdnno") str="不加密转发CDN" ;;
-             "cdnws") str="ws隧道转发CDN" ;;
-             "cdnwss") str="wss隧道转发CDN" ;;
-             *) str="" ;;
-        esac
-        
-        # Print the formatted output
-        printf " %d  | %-15s    | %-10s| %s\n" $i "$str" "$s_port" "$d_ip:$d_port"
-        echo -e "--------------------------------------------------------"
     done
-	read -p "Press Enter to exit..."
+    local candidate
+    candidate=$(mktemp "${STATE_DIR}/config.XXXXXX")
+    cp "$CONFIG_PATH" "$candidate"
+    for ((i=0; i<count; i++)); do
+        local_port=$((10#$start_port + i))
+        remote_port=$((10#$remote_start + i))
+        printf '\n[[endpoints]]\nlisten = "0.0.0.0:%s"\nremote = "%s"\n' "$local_port" "$(format_remote "$host" "$remote_port")" >>"$candidate"
+    done
+    atomic_write_config "$candidate"
+    rm -f "$candidate"
+    ok "已添加 ${count} 条一一映射规则：本地 ${start_port}-${end_port} → 目标 ${remote_start}-$((10#$remote_start + count - 1))"
+    install_service
+    read -r -p "是否立即重启 Realm 使配置生效？[Y/n]：" answer
+    if [[ ! "$answer" =~ ^[Nn]$ ]]; then restart_realm_checked || true; fi
 }
 
-eachconf_retrieve() {
-    d_server=${trans_conf#*#}
-    d_port=${d_server#*#}
-    d_ip=${d_server%#*}
-    flag_s_port=${trans_conf%%#*}
-    s_port=${flag_s_port#*/}
-	is_encrypt=${flag_s_port%/*}
+# 输出配置中的 endpoint 块：序号、本地监听、远程目标。
+list_endpoints() {
+    awk '
+    /^\[\[endpoints\]\][[:space:]]*$/ { if (seen) print idx "|" listen "|" remote; seen=1; idx++; listen=""; remote=""; next }
+    seen && /^[[:space:]]*listen[[:space:]]*=/ { line=$0; sub(/^[^=]*=[[:space:]]*/, "", line); gsub(/[\"]/, "", line); listen=line }
+    seen && /^[[:space:]]*remote[[:space:]]*=/ { line=$0; sub(/^[^=]*=[[:space:]]*/, "", line); gsub(/[\"]/, "", line); remote=line }
+    END { if (seen) print idx "|" listen "|" remote }
+    ' "$CONFIG_PATH"
 }
 
-# 主程序
+show_all_conf() {
+    [[ -f "$CONFIG_PATH" ]] || { warn "配置文件不存在，请先部署 Realm。"; return; }
+    local rows count=0 idx listen remote
+    rows=$(list_endpoints)
+    if [[ -z "$rows" ]]; then msg "当前没有配置任何转发规则。"; return; fi
+    printf '\n%-6s %-24s %s\n' '序号' '本地监听' '目标地址'
+    printf '%s\n' '---------------------------------------------------------------'
+    while IFS='|' read -r idx listen remote; do
+        [[ -n "$idx" ]] || continue
+        printf '%-6s %-24s %s\n' "$idx" "$listen" "$remote"
+        ((count+=1))
+    done <<<"$rows"
+    printf '\n共 %s 条转发规则。\n' "$count"
+}
+
+delete_forward() {
+    ensure_config
+    local rows idx listen remote choice candidate
+    rows=$(list_endpoints)
+    [[ -n "$rows" ]] || { warn "当前没有转发规则。"; return; }
+    show_all_conf
+    read -r -p "输入要删除的规则序号（输入 all 删除全部，回车取消）：" choice
+    [[ -n "$choice" ]] || return 0
+    if [[ "$choice" != "all" && ! "$choice" =~ ^[0-9]+$ ]]; then err "请输入有效序号或 all。"; return 1; fi
+    if [[ "$choice" != "all" ]] && ! awk -F'|' -v n="$choice" '$1==n{found=1} END{exit !found}' <<<"$rows"; then
+        err "规则序号不存在。"; return 1
+    fi
+    candidate=$(mktemp "${STATE_DIR}/config.XXXXXX")
+    awk -v target="$choice" '
+    BEGIN { idx=0; drop=0 }
+    /^\[\[endpoints\]\][[:space:]]*$/ {
+        if (drop==0 && block!="") printf "%s", block
+        block=$0 "\n"; idx++; drop=(target=="all" || idx==target); next
+    }
+    {
+        if (idx==0) { print; next }
+        if (drop==0) block=block $0 "\n"
+    }
+    END { if (drop==0 && block!="") printf "%s", block }
+    ' "$CONFIG_PATH" >"$candidate"
+    atomic_write_config "$candidate"
+    rm -f "$candidate"
+    ok "转发规则已删除；配置已备份。"
+    read -r -p "是否立即重启 Realm 使配置生效？[Y/n]：" choice
+    if [[ ! "$choice" =~ ^[Nn]$ ]]; then restart_realm_checked || true; fi
+}
+
+show_status() {
+    printf '\nRealm 程序：'
+    if service_installed; then "$REALM_BIN" --version 2>/dev/null || echo '已安装'; else echo '未安装'; fi
+    printf '服务状态：'
+    if service_active; then msg "${GREEN}运行中${RESET}"; else msg "${RED}未运行${RESET}"; fi
+    printf '开机启动：'
+    if systemctl is-enabled --quiet realm.service 2>/dev/null; then echo '已启用'; else echo '未启用'; fi
+    printf '配置文件：%s\n' "$CONFIG_PATH"
+}
+
+start_service() {
+    service_installed || { err "Realm 尚未安装，请先选择部署环境。"; return 1; }
+    [[ -f "$CONFIG_PATH" ]] || ensure_config
+    install_service
+    systemctl enable realm.service
+    restart_realm_checked
+}
+
+stop_service() {
+    systemctl stop realm.service || { err "停止服务失败。"; return 1; }
+    systemctl disable realm.service || true
+    ok "Realm 已停止，并已取消开机自启。"
+}
+
+restart_service() {
+    service_installed || { err "Realm 尚未安装。"; return 1; }
+    install_service
+    restart_realm_checked
+}
+
+view_logs() {
+    local n
+    read -r -p "查看最近多少行日志？[默认 100]：" n
+    n=${n:-100}
+    [[ "$n" =~ ^[0-9]+$ ]] || { err "请输入数字。"; return 1; }
+    journalctl -u realm.service -n "$n" --no-pager
+    read -r -p "按回车返回菜单..." _
+}
+
+follow_logs() { journalctl -u realm.service -f; }
+
+check_config() {
+    [[ -f "$CONFIG_PATH" ]] || { err "配置文件不存在。"; return 1; }
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$CONFIG_PATH" <<'PY'
+import sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    print("当前 Python 版本没有 tomllib（需要 Python 3.11+），跳过 TOML 语法校验。")
+    raise SystemExit(0)
+try:
+    with open(sys.argv[1], 'rb') as f:
+        data = tomllib.load(f)
+    endpoints = data.get('endpoints', [])
+    print(f"TOML 语法正确；检测到 {len(endpoints)} 条 endpoint。")
+except Exception as e:
+    print(f"TOML 配置错误：{e}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+    else
+        warn "未安装 Python 3，无法执行完整 TOML 语法校验。"
+    fi
+}
+
+uninstall_realm() {
+    local answer
+    read -r -p "确认卸载 Realm 服务和程序？[y/N]：" answer
+    [[ "$answer" =~ ^[Yy]$ ]] || { warn "已取消卸载。"; return; }
+    systemctl disable --now realm.service 2>/dev/null || true
+    rm -f "$SERVICE_FILE"
+    systemctl daemon-reload
+    rm -rf -- "$REALM_DIR"
+    ok "Realm 服务和程序已卸载。"
+    read -r -p "是否同时删除配置和备份目录 ${STATE_DIR}？[y/N]：" answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then rm -rf -- "$STATE_DIR"; ok "配置和备份已删除。"; else warn "配置和备份已保留。"; fi
+}
+
+update_script() {
+    local self tmp
+    self=$(readlink -f "$0")
+    tmp=$(mktemp "${self}.new.XXXXXX")
+    if ! curl -fL --retry 2 --connect-timeout 10 --max-time 60 "$SCRIPT_URL" -o "$tmp"; then
+        rm -f "$tmp"; err "脚本下载失败，原脚本未修改。"; return 1
+    fi
+    if ! bash -n "$tmp"; then rm -f "$tmp"; err "新脚本语法检查失败，原脚本未修改。"; return 1; fi
+    cp -a "$self" "${self}.bak.$(date +%Y%m%d_%H%M%S)"
+    chmod 0755 "$tmp"
+    mv -f "$tmp" "$self"
+    ok "脚本更新完成。重新启动脚本即可使用新版本。"
+    exit 0
+}
+
+add_from_cli() {
+    local listen="$1" remote="$2" host port
+    [[ "$listen" == *:* && "$remote" == *:* ]] || die "参数格式应为 -l 本地IP:端口 -r 目标IP:端口"
+    local listen_host=${listen%:*} listen_port=${listen##*:}
+    host=${remote%:*}; port=${remote##*:}
+    validate_port "$listen_port" || die "本地端口无效。"
+    validate_port "$port" || die "目标端口无效。"
+    validate_host "$host" || die "目标地址无效。"
+    [[ "$listen_host" == "0.0.0.0" || "$listen_host" == "::" || "$listen_host" == "127.0.0.1" || "$listen_host" == "localhost" ]] || warn "当前版本命令行参数只使用端口，监听地址统一为 0.0.0.0。"
+    ensure_config
+    append_endpoint "$listen_port" "$host" "$port"
+    ok "已添加：0.0.0.0:${listen_port} → $(format_remote "$host" "$port")。需要重启服务后生效。"
+}
+
+show_menu() {
+    clear 2>/dev/null || true
+    msg "${BLUE}==============================================${RESET}"
+    msg "          Realm 转发管理脚本 [${SCRIPT_VERSION}]"
+    msg "${BLUE}==============================================${RESET}"
+    show_status
+    msg ""
+    cat <<'MENU'
+ 1. 部署 / 安装 Realm（自动获取最新版本）
+ 2. 添加单端口转发
+ 3. 添加端口段转发（一一映射）
+ 4. 查看现有转发配置
+ 5. 删除转发规则
+ 6. 启动服务并设置开机自启
+ 7. 停止服务并取消开机自启
+ 8. 重启服务
+ 9. 更新 Realm 程序
+10. 查看服务状态
+11. 查看服务日志
+12. 实时跟踪服务日志
+13. 检查配置文件
+14. 卸载 Realm
+15. 更新管理脚本
+ 0. 退出
+MENU
+    msg "${BLUE}==============================================${RESET}"
+}
+
 main() {
+    require_root
+    check_platform
     check_dependencies
     init_env
+    ensure_realm_user
 
+    # 兼容原脚本的 -l listen:port -r remote:port 用法
+    if (($#)); then
+        local listen_arg="" remote_arg=""
+        while getopts ':l:r:' opt; do
+            case "$opt" in
+                l) listen_arg="$OPTARG" ;;
+                r) remote_arg="$OPTARG" ;;
+                *) die "用法：$0 [-l listen_ip:port -r remote_ip:port]" ;;
+            esac
+        done
+        if [[ -n "$listen_arg" || -n "$remote_arg" ]]; then
+            [[ -n "$listen_arg" && -n "$remote_arg" ]] || die "-l 和 -r 必须同时提供。"
+            add_from_cli "$listen_arg" "$remote_arg"
+            exit 0
+        fi
+    fi
+
+    local choice
     while true; do
         show_menu
-        read -p "请输入选项 [0-11]: " choice
-
-        case $choice in
-            1) deploy_realm ;;
+        read -r -p "请输入选项 [0-15]：" choice || exit 0
+        case "$choice" in
+            1) install_or_update_realm; read -r -p "按回车继续..." _ ;;
             2) add_forward ;;
             3) add_port_range_forward ;;
-			4) show_all_conf ;;
+            4) show_all_conf; read -r -p "按回车返回..." _ ;;
             5) delete_forward ;;
             6) start_service ;;
             7) stop_service ;;
             8) restart_service ;;
-            9) update_realm ;;
-            10) uninstall_realm ;;
-            11) Update_Shell ;;
+            9) install_or_update_realm; read -r -p "按回车继续..." _ ;;
+            10) show_status; systemctl status realm.service --no-pager -l || true; read -r -p "按回车返回..." _ ;;
+            11) view_logs ;;
+            12) follow_logs ;;
+            13) check_config; read -r -p "按回车返回..." _ ;;
+            14) uninstall_realm; read -r -p "按回车继续..." _ ;;
+            15) update_script ;;
             0) exit 0 ;;
-            *) echo "无效的选项，请重新输入。" ;;
+            *) warn "无效选项，请重新输入。"; sleep 1 ;;
         esac
     done
 }
 
-main
+main "$@"
